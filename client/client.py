@@ -1,5 +1,5 @@
 from Pyro5.api import Daemon, Proxy, locate_ns, expose, oneway, callback
-import datetime, time, threading, sys, logging
+import datetime, time, threading, sys, logging, os
 
 # initialize the logger so you can see what is happening with the callback exception message:
 logging.basicConfig(stream=sys.stderr, format="[%(asctime)s,%(name)s,%(levelname)s] %(message)s")
@@ -19,15 +19,22 @@ class Cliente(object):
     def get_uri(self):
         return self.uri
 
+    @oneway
     def notificar(self, msg):
-        print(f'Mensagem recebida: {msg}')
+        print("\nN: "+msg)
+    
+    def responder(self, msg):
+        return input(msg)
+
+    def resposta_assinada(self, msg):
+        pass
 
     def set_public_key(self, public_key):
         Cliente.public_key = public_key
     
     def request_loop(self, daemon):
         daemon.requestLoop()
-        time.sleep(10)
+        time.sleep(5)
     
 
 def cadastro_evento():
@@ -39,31 +46,38 @@ def cadastro_evento():
 
     return {"nome":nome_evento, "data":data, "horario":horario, "alerta":alerta, "convidados":convidados}
 
-with Daemon() as daemon:
-    # register our callback handler
-    print("Bem vindo")
-    #Tu ta olhando oq agr ?, que é ruim acompanhar assim
-    #Acho que tirar o alerta é o mais fácil de fazer agr
-    nome = input("Digite seu nome: ")
-    callback = Cliente(nome)
-    callback.uri = daemon.register(callback)
 
-    loop_thread = threading.Thread(target=callback.request_loop, args=(daemon, ))
-    loop_thread.daemon = False
-    loop_thread.start()
+if __name__ == "__main__":
+    with Daemon() as daemon:
+        print("Bem vindo ao cliente")
+        nome = input("--> Digite seu nome: ")
 
-    with Proxy("PYRONAME:Agenda") as server:
-        # Cria registro do usuário
-        server.cadastro_cliente(callback)
-        # Cria evento
-        evento = cadastro_evento()
-        server.cadastrar_compromisso(callback, evento)
-        print("Compromisso cadastrado")
+        callback = Cliente(nome)
+        callback.uri = daemon.register(callback)
 
-    while True:
-        time.sleep(5)
-    
+        loop_thread = threading.Thread(target=callback.request_loop, args=(daemon, ))
+        loop_thread.daemon = False
+        loop_thread.start()
+
+        with Proxy("PYRONAME:Agenda") as server:
+            # Cadastro do usuário
+            server.cadastro_cliente(callback.uri)
+
+            # Cadastro de compromisso
+            evento = cadastro_evento()
+            server.cadastrar_compromisso(callback.uri, evento)
+
+            # Cancela compromisso
+            # cancel_evento = input("Digite o nome do evento a ser cancelado: ")
+            # server.cancelar_compromisso(callback.uri, cancel_evento)
+
+            # cancel_alerta = input("Digite o nome do evento a ter seu alerta cancelado: ")
+            # server.cancelar_alerta(callback.uri, cancel_alerta)
+
+            checa_evento = input("Digite a data para consulta de eventos: ")
+            server.consultar_compromissos(callback.uri, checa_evento)
 
 
 
-   
+        while True:
+            time.sleep(1)

@@ -6,11 +6,11 @@ from datetime import datetime
 import threading, time
 
 class Usuario():
-    def __init__(self, nome, ref, pk) -> None:
+    def __init__(self, nome, uri, pk) -> None:
         self.nome = nome
-        self.ref = ref
+        self.uri = uri
         self.pk = pk
-        print('User created')
+        print(f"N: Usuario {nome} criado")
     
 class Compromisso():
     def __init__(self, nome, evento) -> None:
@@ -27,6 +27,8 @@ class Servidor(object):
     
     @oneway
     def cadastro_cliente(self, callback):
+        cliente = Proxy(callback)
+
         private_key = rsa.generate_private_key(
             public_exponent=65537,
             key_size=2048
@@ -42,69 +44,75 @@ class Servidor(object):
             encoding=serialization.Encoding.PEM,
             format=serialization.PublicFormat.SubjectPublicKeyInfo
         )
-    
-        callback._pyroClaimOwnership()
-        try:
-            usuario = Usuario(callback.get_nome(), callback.get_uri(), pk)
-            Servidor.usuarios.append(usuario)
-            callback.set_public_key(pem)
 
-        except Exception:
-            print("got an exception from the callback:")
-            print("".join(Pyro5.errors.get_pyro_traceback()))
+        usuario = Usuario(cliente.get_nome(), callback, pk)
+        Servidor.usuarios.append(usuario)
+
+        print(callback)
+        cliente.set_public_key(pem)
+        cliente.notificar("Cliente cadastrado")
         
     @oneway
     def cadastrar_compromisso(self, callback, evento):
-        callback._pyroClaimOwnership()
+        cliente = Proxy(callback)
         try:
-            compromisso = Compromisso(callback.get_nome(), evento)
+            # Cria compromisso usando o nome do cliente e as informações preenchidas do evento
+            compromisso = Compromisso(cliente.get_nome(), evento)
+            # Adiciona a lista de compromissos geral
             Servidor.compromissos.append(compromisso)
+            # Verifica a existencia de convidados e os convida ao evento
             for convidado in evento["convidados"]:
-                print(convidado)
+                # Verifica se o usuário convidado existe e o convida
+                res = [user for user in Servidor.usuarios if convidado == user.nome]
+                if res != []:
+                    # Verifica se o usuário aceita o convite se sim cria outro compromisso com o nome do convidado e adiciona a lista geral
+                    usr = Proxy(res[0].uri)
+                    print(usr)
+                    # Verificar compromisso existente....
+                    # Verificar pk
+                    aceite = usr.responder(f"{cliente.get_nome()} te chamou para {evento['nome']} as {evento['horario']}hrs aceita? 1 para sim, 0 para não\n")
+                    if int(aceite) == 1:
+                        tempo_alerta = usr.responder("Tempo de alerta: 0 para não alertar\n")
+                        evento['alerta'] = tempo_alerta
+                        aux_compromisso = Compromisso(usr.get_nome(), evento)
+                        Servidor.compromissos.append(aux_compromisso)
 
         except Exception:
             print("got an exception from the callback:")
             print("".join(Pyro5.errors.get_pyro_traceback()))
-        #Acho que este convidado não precisaria colocar, dava pra apenas mandar para o convidado o request
-        #compromisso = Compromisso(referenciaCliente, nome_evento, data, horario, alerta, convidados)
-        #compromissos.append(compromisso)
 
-        #return compromisso, podemos enviar os compromissos pro cliente em si, assim a gente pode usar
-        # a referencia do cliente como subscriber para que o servidor chame a lista de compromissos daquele usuario
+    def cancelar_compromisso(self, callback, evento):
+        cliente = Proxy(callback)
+        [
+            Servidor.compromissos.remove(comp) 
+            for comp in Servidor.compromissos 
+            if comp.nome_evento == evento and comp.nome == cliente.get_nome()
+        ]
+        print(len(Servidor.compromissos))
+        cliente.notificar("Compromisso excluído")
 
-    def cancelar_compromisso(self, referenciaCliente):
-        #cancelamento = input("Digite o nome do evento o qual deseja cancelar:")
-        #for c in compromissos
-            #if c.nome == cancelamento
-                # compromissos.pop(c)
+    def cancelar_alerta(self, callback, evento):
+        cliente = Proxy(callback)
+        encontrado = [comp for comp in Servidor.compromissos if comp.nome_evento == evento and comp.nome == cliente.get_nome()]
+        for e in encontrado:
+            e.alerta = 0
+            cliente.notificar(f"Evento {e.nome_evento} teve seu alerta cancelado")
 
-        cliente = Proxy(referenciaCliente)
-        cliente.notificacao("Compromisso excluído")
-    def cancelar_alerta(self, referenciaCliente):
-        
-        #cancelamento =  input("Qual evento deseja cancelar o alerta ?")
-        #for c in compromissos
-            #if c.nome == cancelamento
-                #c.alerta = 0
-                # cliente = Proxy(referenciaCliente)
-                # cliente.notificacao("Alerta desativado")
-                #break
-        pass
-    def consultar_compromissos(self, referenciaCliente):
-        #data = input("Qual a data a qual deseja pesquisar eventos ?")
-        #data = datetime.strptime(data, '%d/%m/%Y').date()
-        #for c in compromissos
-            #if c.nome == referenciaCliente and c.data == data
-                #cliente = Proxy(referenciaCliente)
-                #cliente.notificacao("Event infos")
-
-        pass
+    def consultar_compromissos(self, callback, evento):
+        cliente = Proxy(callback)
+        compromissos = [comp for comp in Servidor.compromissos if comp.nome == cliente.get_nome() and comp.data == evento]
+        if compromissos:
+            cliente.notificar(f"{len(compromissos)} Eventos encontrados")
+            for c in compromissos:
+                cliente.notificar(f"Evento {c.nome_evento} - {c.horario}")
 
     def loop_compromissos(self):
         while True:
             for comp in Servidor.compromissos:
                 if comp.alerta > 0:
-                    print('Evento hoje & alerta ativo')
+                    comp.alerta = 0
+                    print(f"Compromisso com alerta encontrado: {comp.nome_evento}")
+                    
 
 with Daemon() as daemon:
     print("Starting server")
