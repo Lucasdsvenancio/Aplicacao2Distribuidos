@@ -1,15 +1,19 @@
-from Pyro5.api import Daemon, Proxy, locate_ns, expose, oneway, callback, serve
+from Pyro5.api import Daemon, Proxy, locate_ns, expose, oneway
 import Pyro5.errors
-from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import serialization
-from datetime import datetime
+from cryptography.hazmat.primitives.asymmetric import ed25519
+import base64
+from datetime import date, datetime
 import threading, time
 
+def encode64(bytes):
+    return base64.b64encode(bytes).decode(encoding="utf-8")
+
 class Usuario():
-    def __init__(self, nome, uri, pk) -> None:
+    def __init__(self, nome, uri, private_key) -> None:
         self.nome = nome
         self.uri = uri
-        self.pk = pk
+        self.private_key = private_key
         print(f"N: Usuario {nome} criado")
     
 class Compromisso():
@@ -17,8 +21,8 @@ class Compromisso():
         self.nome = nome
         self.nome_evento = evento["nome"]
         self.data = evento["data"]
-        self.horario = evento["horario"]
         self.alerta = int(evento["alerta"])
+        self.alertado = 0
 
 @expose
 class Servidor(object):
@@ -29,58 +33,48 @@ class Servidor(object):
     def cadastro_cliente(self, callback):
         cliente = Proxy(callback)
 
-        private_key = rsa.generate_private_key(
-            public_exponent=65537,
-            key_size=2048
-        )
-        pk = private_key.private_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PrivateFormat.PKCS8,
-            encryption_algorithm=serialization.NoEncryption()
-        )
+        private_key = ed25519.Ed25519PrivateKey.generate()
+
         public_key = private_key.public_key()
-        
-        pem = public_key.public_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PublicFormat.SubjectPublicKeyInfo
+
+        public_bytes = public_key.public_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PublicFormat.Raw
         )
 
-        usuario = Usuario(cliente.get_nome(), callback, pk)
+        usuario = Usuario(cliente.get_nome(), callback, private_key)
         Servidor.usuarios.append(usuario)
 
-        print(callback)
-        cliente.set_public_key(pem)
+        cliente.set_public_key(encode64(public_bytes))
         cliente.notificar("Cliente cadastrado")
         
     @oneway
     def cadastrar_compromisso(self, callback, evento):
         cliente = Proxy(callback)
         try:
-            # Cria compromisso usando o nome do cliente e as informações preenchidas do evento
             compromisso = Compromisso(cliente.get_nome(), evento)
-            # Adiciona a lista de compromissos geral
             Servidor.compromissos.append(compromisso)
-            # Verifica a existencia de convidados e os convida ao evento
+            
             for convidado in evento["convidados"]:
-                # Verifica se o usuário convidado existe e o convida
                 res = [user for user in Servidor.usuarios if convidado == user.nome]
+
                 if res != []:
-                    # Verifica se o usuário aceita o convite se sim cria outro compromisso com o nome do convidado e adiciona a lista geral
                     usr = Proxy(res[0].uri)
-                    print(usr)
-                    # Verificar compromisso existente....
-                    # Verificar pk
-                    aceite = usr.responder(f"{cliente.get_nome()} te chamou para {evento['nome']} as {evento['horario']}hrs aceita? 1 para sim, 0 para não\n")
-                    if int(aceite) == 1:
+                    
+                    msg = f"{cliente.get_nome()} te chamou para {evento['nome']} as {evento['horario']}hrs aceita? 1 para sim, 0 para não\n"
+                    signature = res[0].private_key.sign(msg.encode())
+                    verifica = usr.resposta_assinada(encode64(signature), msg)
+                    if int(verifica) == 1: 
                         tempo_alerta = usr.responder("Tempo de alerta: 0 para não alertar\n")
                         evento['alerta'] = tempo_alerta
                         aux_compromisso = Compromisso(usr.get_nome(), evento)
                         Servidor.compromissos.append(aux_compromisso)
-
         except Exception:
             print("got an exception from the callback:")
             print("".join(Pyro5.errors.get_pyro_traceback()))
 
+
+    @oneway
     def cancelar_compromisso(self, callback, evento):
         cliente = Proxy(callback)
         [
@@ -91,6 +85,7 @@ class Servidor(object):
         print(len(Servidor.compromissos))
         cliente.notificar("Compromisso excluído")
 
+    @oneway
     def cancelar_alerta(self, callback, evento):
         cliente = Proxy(callback)
         encontrado = [comp for comp in Servidor.compromissos if comp.nome_evento == evento and comp.nome == cliente.get_nome()]
@@ -98,20 +93,28 @@ class Servidor(object):
             e.alerta = 0
             cliente.notificar(f"Evento {e.nome_evento} teve seu alerta cancelado")
 
+    @oneway
     def consultar_compromissos(self, callback, evento):
         cliente = Proxy(callback)
-        compromissos = [comp for comp in Servidor.compromissos if comp.nome == cliente.get_nome() and comp.data == evento]
+        compromissos = [comp for comp in Servidor.compromissos if comp.nome == cliente.get_nome() and datetime.strptime(comp.data, "%d/%m/%Y %H:%M").date().strftime("%d/%m/%Y") == evento]
         if compromissos:
             cliente.notificar(f"{len(compromissos)} Eventos encontrados")
             for c in compromissos:
-                cliente.notificar(f"Evento {c.nome_evento} - {c.horario}")
+                cliente.notificar(f"Evento {c.nome_evento} - {c.data}")
+
 
     def loop_compromissos(self):
         while True:
-            for comp in Servidor.compromissos:
-                if comp.alerta > 0:
-                    comp.alerta = 0
-                    print(f"Compromisso com alerta encontrado: {comp.nome_evento}")
+            for c in Servidor.compromissos:
+                if c.alertado == 0:
+                    now = datetime.now().timestamp()
+                    horario = datetime.strptime(c.data, "%d/%m/%Y %H:%M").timestamp()
+                    if (horario - now)/ 60 <= c.alerta:
+                        user = [usr for usr in Servidor.usuarios if usr.nome == c.nome]
+                        cliente = Proxy(user[0].uri)
+                        cliente.notificar(f"Voce tem um compromisso daqui {c.alerta} minutos")
+                        c.alertado = 1
+
                     
 
 with Daemon() as daemon:

@@ -1,10 +1,11 @@
 from Pyro5.api import Daemon, Proxy, locate_ns, expose, oneway, callback
 import datetime, time, threading, sys, logging, os
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ed25519
+import base64
 
-# initialize the logger so you can see what is happening with the callback exception message:
-logging.basicConfig(stream=sys.stderr, format="[%(asctime)s,%(name)s,%(levelname)s] %(message)s")
-log = logging.getLogger("Pyro5")
-log.setLevel(logging.WARNING)
+def decode64(str):
+    return base64.b64decode(str)
 
 @expose
 class Cliente(object):
@@ -21,30 +22,37 @@ class Cliente(object):
 
     @oneway
     def notificar(self, msg):
-        print("\nN: "+msg)
+        print(msg)
     
     def responder(self, msg):
         return input(msg)
 
-    def resposta_assinada(self, msg):
-        pass
+    def resposta_assinada(self, sign, msg):
+        loaded_public_key = ed25519.Ed25519PublicKey.from_public_bytes(decode64(Cliente.public_key))
+        sign = decode64(sign)
+        byte_msg = msg.encode()
+        try:
+            loaded_public_key.verify(sign, byte_msg)
+            resposta = self.responder(msg)
+            return resposta
+        except:
+            print("Verification failed!")
 
-    def set_public_key(self, public_key):
-        Cliente.public_key = public_key
+    def set_public_key(self, public_bytes):
+        Cliente.public_key = public_bytes
     
     def request_loop(self, daemon):
         daemon.requestLoop()
-        time.sleep(5)
+        time.sleep(2)
     
 
 def cadastro_evento():
     nome_evento = input("Informe o nome do seu evento: ")
-    data = input("Informe a data deste evento: ")
-    horario = input("Informe as horas que esse evento irá começar: ")
+    data = input("Informe a data deste evento, formato dd/mm/YYYY HH:MM: ")
     alerta = input("Deseja ser avisado quanto tempo antes deste evento? caso não deseje apenas digite 0: ")
     convidados = input("Deseja convidar alguém, se sim escreva os nomes: ").split(", ")
 
-    return {"nome":nome_evento, "data":data, "horario":horario, "alerta":alerta, "convidados":convidados}
+    return {"nome":nome_evento, "data":data, "alerta":alerta, "convidados":convidados}
 
 
 if __name__ == "__main__":
@@ -71,13 +79,13 @@ if __name__ == "__main__":
             # cancel_evento = input("Digite o nome do evento a ser cancelado: ")
             # server.cancelar_compromisso(callback.uri, cancel_evento)
 
+            # Cancela alerta
             # cancel_alerta = input("Digite o nome do evento a ter seu alerta cancelado: ")
             # server.cancelar_alerta(callback.uri, cancel_alerta)
 
-            checa_evento = input("Digite a data para consulta de eventos: ")
+            # Consulta compromisso
+            checa_evento = input("Digite a data para consulta de eventos, formato dd/mm/YYYY: ")
             server.consultar_compromissos(callback.uri, checa_evento)
-
-
 
         while True:
             time.sleep(1)
