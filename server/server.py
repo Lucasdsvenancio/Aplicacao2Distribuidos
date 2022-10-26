@@ -14,7 +14,7 @@ class Usuario():
         self.nome = nome
         self.uri = uri
         self.private_key = private_key
-        print(f"N: Usuario {nome} criado")
+        print(f"Usuario {nome} criado")
     
 class Compromisso():
     def __init__(self, nome, evento) -> None:
@@ -46,7 +46,6 @@ class Servidor(object):
         Servidor.usuarios.append(usuario)
 
         cliente.set_public_key(encode64(public_bytes))
-        cliente.notificar("Cliente cadastrado")
         
     @oneway
     def cadastrar_compromisso(self, callback, evento):
@@ -61,7 +60,7 @@ class Servidor(object):
                 if res != []:
                     usr = Proxy(res[0].uri)
                     
-                    msg = f"{cliente.get_nome()} te chamou para {evento['nome']} as {evento['horario']}hrs aceita? 1 para sim, 0 para não\n"
+                    msg = f"{cliente.get_nome()} te chamou para {evento['nome']} as {evento['data']} aceita? 1 para sim, 0 para não\n"
                     signature = res[0].private_key.sign(msg.encode())
                     verifica = usr.resposta_assinada(encode64(signature), msg)
                     if int(verifica) == 1: 

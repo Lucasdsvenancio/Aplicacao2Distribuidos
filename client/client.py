@@ -70,22 +70,26 @@ if __name__ == "__main__":
         with Proxy("PYRONAME:Agenda") as server:
             # Cadastro do usuário
             server.cadastro_cliente(callback.uri)
-
-            # Cadastro de compromisso
-            evento = cadastro_evento()
-            server.cadastrar_compromisso(callback.uri, evento)
-
-            # Cancela compromisso
-            # cancel_evento = input("Digite o nome do evento a ser cancelado: ")
-            # server.cancelar_compromisso(callback.uri, cancel_evento)
-
-            # Cancela alerta
-            # cancel_alerta = input("Digite o nome do evento a ter seu alerta cancelado: ")
-            # server.cancelar_alerta(callback.uri, cancel_alerta)
-
-            # Consulta compromisso
-            checa_evento = input("Digite a data para consulta de eventos, formato dd/mm/YYYY: ")
-            server.consultar_compromissos(callback.uri, checa_evento)
-
-        while True:
-            time.sleep(1)
+            while True: 
+                print("--------------------------------")
+                print("1-Cadastrar Evento\n2-Cancelar Evento\n3-Cancelar Alerta\n4-Consultar Compromissos")
+                option = int(input(""))
+                if option == 1:
+                 # Cadastro de compromisso
+                    evento = cadastro_evento()
+                    server.cadastrar_compromisso(callback.uri, evento)
+                elif option == 2:
+                    # Cancela compromisso
+                    cancel_evento = input("Digite o nome do evento a ser cancelado: ")
+                    server.cancelar_compromisso(callback.uri, cancel_evento)
+                elif option == 3:
+                # Cancela alerta
+                    cancel_alerta = input("Digite o nome do evento a ter seu alerta cancelado: ")
+                    server.cancelar_alerta(callback.uri, cancel_alerta)
+                elif option == 4:
+                # Consulta compromisso
+                    checa_evento = input("Digite a data para consulta de eventos, formato dd/mm/YYYY: ")
+                    server.consultar_compromissos(callback.uri, checa_evento)
+                else:
+                    while True:
+                        time.sleep(1)
